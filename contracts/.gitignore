@@ -1,0 +1,12 @@
+out/
+cache/
+broadcast/*/dry-run/
+broadcast/**/run-latest.json.pending
+
+# Never commit real keys
+.env
+.env.local
+.env.*.local
+
+# Foundry deps (comment out if you prefer vendoring)
+# lib/
