@@ -1,0 +1,27 @@
+node_modules/
+.next/
+dist/
+build/
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# secrets — never commit real env files or key material
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.key
+*.pem
+
+# databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# foundry build artifacts
+out/
+cache/
+broadcast/*/dry-run/
+broadcast/**/run-latest.json.pending
