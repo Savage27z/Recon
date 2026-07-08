@@ -1,0 +1,21 @@
+{
+  "name": "@recon/watcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "watch": "node --env-file=.env --experimental-sqlite --no-warnings=ExperimentalWarning --import tsx src/index.ts",
+    "watch:mainnet": "node --env-file=.env.mainnet --experimental-sqlite --no-warnings=ExperimentalWarning --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openai": "^6.45.0",
+    "viem": "^2.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
