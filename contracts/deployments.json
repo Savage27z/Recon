@@ -1,0 +1,34 @@
+{
+  "hashkey_testnet": {
+    "chainId": 133,
+    "rpc": "https://testnet.hsk.xyz",
+    "explorer": "https://testnet-explorer.hsk.xyz",
+    "InvoiceRegistry": {
+      "address": "0x55Ec99E2F0fd1EcF3Ee20689fE21eD6bb0cD1235",
+      "deployer": "0xB155A22500C7893AF0c7FA0AB6e28d565C4fE1aA",
+      "deployBlock": 30098342,
+      "verified": true,
+      "explorerUrl": "https://testnet-explorer.hsk.xyz/address/0x55Ec99E2F0fd1EcF3Ee20689fE21eD6bb0cD1235"
+    },
+    "MockUSDC": {
+      "address": "0x42d77Bb3aeC7C1f4df2ffc9Cce3e5C3F5Ec39D65",
+      "deployer": "0xB155A22500C7893AF0c7FA0AB6e28d565C4fE1aA",
+      "deployBlock": 30098615,
+      "verified": true,
+      "explorerUrl": "https://testnet-explorer.hsk.xyz/address/0x42d77Bb3aeC7C1f4df2ffc9Cce3e5C3F5Ec39D65"
+    }
+  },
+  "hashkey_mainnet": {
+    "chainId": 177,
+    "rpc": "https://mainnet.hsk.xyz",
+    "explorer": "https://hsk.blockscout.com",
+    "InvoiceRegistry": {
+      "address": "0xCF3d9752854Ee9745f0BD279b9124dF3c46bbd21",
+      "deployer": "0xd876C746A5fbFb26A202596900C969192dF846e0",
+      "deployBlock": 24572046,
+      "deployTx": "0x2f5b23494677865f8fbf306b1d3222fba360ddf15bf09c82f27767227f867517",
+      "verified": true,
+      "explorerUrl": "https://hsk.blockscout.com/address/0xCF3d9752854Ee9745f0BD279b9124dF3c46bbd21"
+    }
+  }
+}
