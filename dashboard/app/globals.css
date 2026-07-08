@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Google Fonts — Manrope + Playfair Display for landing, JetBrains Mono for hashes */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Playfair+Display:ital,wght@0,700;1,600;1,700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+html,
+body {
+  color: #1c1b18;
+  font-family:
+    'Manrope',
+    -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
+  letter-spacing: -0.005em;
+}
+
+body {
+  background: #f7f4ec;
+}
+
+/* Landing page has its own dark background */
+body:has(.landing-root) {
+  background: #1c1b18;
+}
+
+.landing-root {
+  --accent: #ff6a39;
+  --accent-hover: #ff8a5f;
+  --accent-soft: rgba(255, 106, 57, 0.15);
+  --font-accent: 'Playfair Display', serif;
+  --style-accent: italic;
+  --ls-accent: -0.01em;
+
+  /* Alternating rhythm: dark → cream → dark → cream */
+  --bg-hero: #1c1b18;     /* DARK — floating orange cards pop */
+  --bg-problem: #F7F4EC;  /* CREAM — Playfair italic reads editorial */
+  --bg-how: #1c1b18;      /* DARK — three-step grid, orange numerals */
+  --bg-ai: #F7F4EC;       /* CREAM — dark inset demo card contrasts */
+  --bg-demo: #1c1b18;     /* DARK — marquee of dark rows */
+  --bg-hashkey: #F7F4EC;  /* CREAM — long copy on light */
+  --bg-faq: #1c1b18;      /* DARK — accordion */
+
+  /* Foreground on dark sections */
+  --fg-hero: #fdfaf3;
+  --fg-how: #fdfaf3;
+  --fg-demo: #fdfaf3;
+  --fg-faq: #fdfaf3;
+  --fgm-hero: #b7b2a6;
+  --fgm-how: #b7b2a6;
+  --fgd-faq: #8a8578;
+  --bd-hero: rgba(253, 250, 243, 0.15);
+  --bd-faq: rgba(253, 250, 243, 0.08);
+
+  /* Foreground on cream sections */
+  --fg-problem: #1c1b18;
+  --fg-ai: #1c1b18;
+  --fg-hashkey: #1c1b18;
+  --fgm-ai: #5c5850;
+  --fgm-hashkey: #5c5850;
+  --bd-problem: rgba(28, 27, 24, 0.12);
+
+  scroll-behavior: smooth;
+  scroll-snap-type: y proximity;
+  color: #fdfaf3;
+}
+
+.landing-root a {
+  color: #ff6a39;
+  text-decoration: none;
+}
+.landing-root a:hover {
+  color: #ff8a5f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes reconFloat1 {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(-1deg);
+  }
+}
+@keyframes reconFloat2 {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(4deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(6deg);
+  }
+}
+@keyframes reconMarquee {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+
+.animate-reconFloat1 {
+  animation: reconFloat1 7s ease-in-out infinite;
+}
+.animate-reconFloat2 {
+  animation: reconFloat2 6s ease-in-out infinite;
+}
+.animate-reconMarquee {
+  animation: reconMarquee 16s linear infinite;
+}
+
+/* --- Landing: mobile overrides (inline styles need !important) --- */
+@media (max-width: 860px) {
+  .landing-root {
+    scroll-snap-type: none;
+  }
+  .l-nav {
+    padding: 14px 18px !important;
+  }
+  .l-nav-links {
+    gap: 14px !important;
+  }
+  .l-section {
+    padding: 64px 22px !important;
+    min-height: auto !important;
+  }
+  .l-grid2 {
+    grid-template-columns: 1fr !important;
+    gap: 40px !important;
+  }
+  .l-grid3 {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+  .l-hero-h1 {
+    font-size: 40px !important;
+  }
+  .l-hero-visual {
+    height: 300px !important;
+  }
+  .l-h2 {
+    font-size: 27px !important;
+  }
+  .l-cta-h2 {
+    font-size: 30px !important;
+  }
+}
