@@ -1,0 +1,11 @@
+{
+  "name": "recon-hsp-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "demo"
+  ]
+}
