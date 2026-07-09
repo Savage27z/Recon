@@ -13,6 +13,7 @@ DASHBOARD_PID=$!
 # to background jobs on its own, so without this trap both children get
 # hard-killed on every redeploy instead of shutting down cleanly.
 forward_signal() {
+  echo "start.sh: caught signal, forwarding to children"
   kill -TERM "$WATCHER_PID" "$DASHBOARD_PID" 2>/dev/null || true
 }
 trap forward_signal SIGTERM SIGINT
