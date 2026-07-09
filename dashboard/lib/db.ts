@@ -216,9 +216,14 @@ export function getStats(merchant: string): StatBlock {
   // Grouped per-token: different tokens can have different decimals (HSK is
   // 18dp vs the stablecoins' 6dp), so a single blended SUM would be
   // meaningless — report each token's volume separately instead.
+  // SUM is cast to TEXT, not left as a raw INTEGER column: node:sqlite throws
+  // ("Value is too large to be represented as a JavaScript number") for any
+  // 64-bit SQL integer past Number.MAX_SAFE_INTEGER, which HSK's 18-decimal
+  // amounts (~10^18) blow straight through. Stringifying keeps it a lossless
+  // BigInt-parseable value instead.
   const volumeRows = db()
     .prepare(
-      `SELECT p.token token, COALESCE(SUM(CAST(p.amount AS INTEGER)), 0) sum
+      `SELECT p.token token, CAST(COALESCE(SUM(CAST(p.amount AS INTEGER)), 0) AS TEXT) sum
        FROM matches m
        JOIN invoices i ON i.chain_id = m.chain_id AND i.id = m.invoice_id
        JOIN payments p
@@ -228,7 +233,7 @@ export function getStats(merchant: string): StatBlock {
        WHERE m.chain_id = ? AND m.created_at >= ? AND LOWER(i.merchant) = LOWER(?)
        GROUP BY p.token`,
     )
-    .all(CHAIN_ID, startOfDayMs, merchant) as Array<{ token: string; sum: number | bigint }>;
+    .all(CHAIN_ID, startOfDayMs, merchant) as Array<{ token: string; sum: string }>;
   const volumeToday6dp =
     volumeRows.length === 0
       ? '0.000000'
