@@ -53,11 +53,23 @@ function rwDb(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS invoice_notes (
       chain_id     INTEGER NOT NULL,
       invoice_id   TEXT    NOT NULL,
+      merchant     TEXT    NOT NULL DEFAULT '',
       note         TEXT    NOT NULL,
       created_at   INTEGER NOT NULL,
       PRIMARY KEY (chain_id, invoice_id)
     );
   `);
+  // Migration: invoice_notes originally had no merchant column, keyed only by
+  // invoice_id. Without it, a note written before the watcher has indexed the
+  // invoice (see setInvoiceNote) has no owner binding at all, and a different
+  // authenticated merchant who observes the invoiceId in that window could
+  // attach a note that later renders on someone else's invoice. Requiring the
+  // join in getInvoices to also match merchant closes that regardless of
+  // timing.
+  const noteCols = cachedRw.prepare('PRAGMA table_info(invoice_notes)').all() as Array<{ name: string }>;
+  if (!noteCols.some((c) => c.name === 'merchant')) {
+    cachedRw.exec("ALTER TABLE invoice_notes ADD COLUMN merchant TEXT NOT NULL DEFAULT ''");
+  }
   return cachedRw;
 }
 
@@ -238,31 +250,36 @@ export function getStats(merchant: string): StatBlock {
   ).c;
 
   // Grouped per-token: different tokens can have different decimals (HSK is
-  // 18dp vs the stablecoins' 6dp), so a single blended SUM would be
+  // 18dp vs the stablecoins' 6dp), so a single blended total would be
   // meaningless — report each token's volume separately instead.
-  // SUM is cast to TEXT, not left as a raw INTEGER column: node:sqlite throws
-  // ("Value is too large to be represented as a JavaScript number") for any
-  // 64-bit SQL integer past Number.MAX_SAFE_INTEGER, which HSK's 18-decimal
-  // amounts (~10^18) blow straight through. Stringifying keeps it a lossless
-  // BigInt-parseable value instead.
-  const volumeRows = db()
+  //
+  // Summed in JS via BigInt, not SQL SUM(): SQLite's sum() aggregate tracks
+  // a 64-bit running total and throws its own "integer overflow" exception
+  // once that total exceeds ~9.22e18 — reachable from just ~9.22 HSK of
+  // combined daily volume at 18 decimals. Fetching the raw TEXT amounts and
+  // reducing with BigInt (arbitrary precision) sidesteps that ceiling
+  // entirely, rather than just moving where it bites.
+  const paymentRows = db()
     .prepare(
-      `SELECT p.token token, CAST(COALESCE(SUM(CAST(p.amount AS INTEGER)), 0) AS TEXT) sum
+      `SELECT p.token token, p.amount amount
        FROM matches m
        JOIN invoices i ON i.chain_id = m.chain_id AND i.id = m.invoice_id
        JOIN payments p
          ON p.chain_id = m.chain_id
         AND p.tx_hash = m.tx_hash
         AND p.log_index = m.log_index
-       WHERE m.chain_id = ? AND m.created_at >= ? AND LOWER(i.merchant) = LOWER(?)
-       GROUP BY p.token`,
+       WHERE m.chain_id = ? AND m.created_at >= ? AND LOWER(i.merchant) = LOWER(?)`,
     )
-    .all(CHAIN_ID, startOfDayMs, merchant) as Array<{ token: string; sum: string }>;
+    .all(CHAIN_ID, startOfDayMs, merchant) as Array<{ token: string; amount: string }>;
+  const sumsByToken = new Map<string, bigint>();
+  for (const r of paymentRows) {
+    sumsByToken.set(r.token, (sumsByToken.get(r.token) ?? 0n) + BigInt(r.amount));
+  }
   const volumeToday6dp =
-    volumeRows.length === 0
+    sumsByToken.size === 0
       ? '0'
-      : volumeRows
-          .map((r) => `${fmtCompact(r.sum, decimalsFor(r.token))} ${symbolFor(r.token)}`)
+      : Array.from(sumsByToken.entries())
+          .map(([token, sum]) => `${fmtCompact(sum, decimalsFor(token))} ${symbolFor(token)}`)
           .join(' + ');
 
   const total = (
@@ -426,7 +443,10 @@ export function getInvoices(merchant: string, limit = 50): InvoiceRow[] {
     .prepare(
       `SELECT i.id, i.amount, i.token, i.due_date, i.status, i.created_at_tx, i.seen_at, n.note
        FROM invoices i
-       LEFT JOIN invoice_notes n ON n.chain_id = i.chain_id AND n.invoice_id = i.id
+       LEFT JOIN invoice_notes n
+         ON n.chain_id = i.chain_id
+        AND n.invoice_id = i.id
+        AND LOWER(n.merchant) = LOWER(i.merchant)
        WHERE i.chain_id = ? AND LOWER(i.merchant) = LOWER(?)
        ORDER BY i.seen_at DESC
        LIMIT ?`,
@@ -451,10 +471,12 @@ export function getInvoices(merchant: string, limit = 50): InvoiceRow[] {
  * The on-chain registry has no memo field, so this is purely a dashboard
  * convenience. Called right after the createInvoice tx confirms, which can
  * race the watcher's own poll loop — the invoice row may not exist in this
- * DB yet. invoiceId is a 256-bit client-generated random value, so an
- * unrelated caller can't feasibly guess one in advance; the only real
- * cross-tenant risk is overwriting a note on an invoice that already
- * belongs to someone else, which this still rejects.
+ * DB yet, so this rejects only when the invoice is already known to belong
+ * to someone else. The note itself is stamped with the calling merchant and
+ * getInvoices' join requires that to match the invoice's actual on-chain
+ * merchant too — so even if a different authenticated merchant raced to
+ * attach a note before the real invoice was indexed, it would never be the
+ * one displayed once the real invoice (with its real merchant) shows up.
  */
 export function setInvoiceNote(merchant: string, invoiceId: string, note: string): boolean {
   const conn = rwDb();
@@ -465,13 +487,14 @@ export function setInvoiceNote(merchant: string, invoiceId: string, note: string
 
   conn
     .prepare(
-      `INSERT INTO invoice_notes (chain_id, invoice_id, note, created_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO invoice_notes (chain_id, invoice_id, merchant, note, created_at)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (chain_id, invoice_id) DO UPDATE SET
+         merchant = excluded.merchant,
          note = excluded.note,
          created_at = excluded.created_at`,
     )
-    .run(CHAIN_ID, invoiceId, note.slice(0, 500), Date.now());
+    .run(CHAIN_ID, invoiceId, merchant, note.slice(0, 500), Date.now());
   return true;
 }
 

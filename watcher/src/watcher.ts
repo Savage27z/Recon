@@ -218,8 +218,9 @@ async function scanInvoiceRegistry(
     });
     if (ok > 0) {
       createdCount++;
+      const isNative = log.args.token!.toLowerCase() === NATIVE_TOKEN.toLowerCase();
       console.log(
-        `[invoice.created] id=${log.args.id} merchant=${log.args.merchant} token=${log.args.token} amount=${fmtAmount(log.args.amount!)}`,
+        `[invoice.created] id=${log.args.id} merchant=${log.args.merchant} token=${log.args.token} amount=${fmtAmount(log.args.amount!, isNative ? 18 : 6)}`,
       );
     }
   }
