@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { StatBlock } from '@/lib/db';
+import { TOKENS } from '@/lib/chain';
 
 export function StatCards() {
   const [s, setS] = useState<StatBlock | null>(null);
@@ -33,7 +34,7 @@ export function StatCards() {
       <Card
         label="Volume today"
         value={s ? s.volumeToday6dp : '—'}
-        hint="mUSDC · matched only"
+        hint={`${TOKENS.map((t) => t.symbol).join('/')} · matched only`}
       />
       <Card
         label="Auto-matched rate"

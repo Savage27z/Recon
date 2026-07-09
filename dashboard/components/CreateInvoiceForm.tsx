@@ -20,6 +20,10 @@ const ABI = [
   },
 ] as const;
 
+function short(addr: string): string {
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 function randomInvoiceId(): Hex {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return `0x${Buffer.from(bytes).toString('hex')}` as Hex;
@@ -68,6 +72,17 @@ export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
       const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[];
       const from = accounts[0];
       if (!from) throw new Error('No account returned by wallet');
+
+      const meRes = await fetch('/api/me', { cache: 'no-store' });
+      if (meRes.ok) {
+        const { merchant } = (await meRes.json()) as { merchant: string };
+        if (merchant.toLowerCase() !== from.toLowerCase()) {
+          throw new Error(
+            `Wallet account mismatch: your wallet's active account (${short(from)}) is different ` +
+              `from the account you signed in with (${short(merchant)}). Switch your wallet to ${short(merchant)} and try again.`,
+          );
+        }
+      }
 
       try {
         await provider.request({
