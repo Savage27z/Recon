@@ -94,7 +94,8 @@ export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
       }
 
       const id = randomInvoiceId();
-      const amountBase = parseUnits(amount, 6);
+      const decimals = TOKENS.find((t) => t.address.toLowerCase() === token.toLowerCase())?.decimals ?? 6;
+      const amountBase = parseUnits(amount, decimals);
       const dueDateSec = BigInt(Math.floor(new Date(dueDate).getTime() / 1000));
 
       const data = encodeFunctionData({

@@ -7,12 +7,20 @@ export const INVOICE_REGISTRY = (process.env.NEXT_PUBLIC_INVOICE_REGISTRY ?? '')
 export interface TokenOption {
   symbol: string;
   address: `0x${string}`;
+  decimals: number;
 }
 
+// NEXT_PUBLIC_TOKENS entries are "SYMBOL:ADDRESS" (defaults to 6 decimals,
+// matching the stablecoins this was built around) or "SYMBOL:ADDRESS:DECIMALS"
+// for tokens like HSK (18 decimals) that don't use the stablecoin default.
 export const TOKENS: TokenOption[] = (process.env.NEXT_PUBLIC_TOKENS ?? '')
   .split(',')
   .filter(Boolean)
   .map((pair) => {
-    const [symbol, address] = pair.split(':');
-    return { symbol: symbol ?? '', address: (address ?? '') as `0x${string}` };
+    const [symbol, address, decimals] = pair.split(':');
+    return {
+      symbol: symbol ?? '',
+      address: (address ?? '') as `0x${string}`,
+      decimals: decimals ? Number(decimals) : 6,
+    };
   });

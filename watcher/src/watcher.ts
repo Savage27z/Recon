@@ -1,6 +1,6 @@
 import type { Address, Hex, PublicClient } from 'viem';
 import { InvoiceCreatedEvent, InvoicePaidEvent, TransferEvent } from './abi.ts';
-import type { Config } from './config.ts';
+import { NATIVE_TOKEN, type Config } from './config.ts';
 import { matchOpenInvoices, runTier3 } from './matcher.ts';
 import type { PaymentRow, Store } from './db.ts';
 import { extractReference } from './reference.ts';
@@ -98,6 +98,78 @@ async function scanToken(
   const range = to - from + 1n;
   const suffix = inserted > 0 ? ` — ${inserted} payment(s)` : '';
   console.log(`[scan.payments] token=${token} blocks=${from}..${to} (${range})${suffix}`);
+  return { caughtUp: to >= latest };
+}
+
+/**
+ * HSK is the chain's native gas token, not an ERC20 contract, so it never
+ * emits a Transfer event — scanToken's eth_getLogs approach can't see it.
+ * Instead we read each block's full transaction list and treat a plain
+ * value-bearing send to a tracked merchant address as a "payment" in the
+ * NATIVE_TOKEN sentinel, same shape as an ERC20 Transfer for the matcher.
+ * logIndex is fixed at -1 (native sends have no log) — safe from collision
+ * since real log indices are always >= 0.
+ */
+async function scanNative(
+  client: PublicClient,
+  store: Store,
+  cfg: Config,
+  latest: bigint,
+  merchants: Address[],
+): Promise<{ caughtUp: boolean }> {
+  const source = 'native';
+  const cursor = store.getCursor(cfg.chainId, source);
+  const from = cursor === null ? cfg.nativeStartBlock : cursor + 1n;
+  if (from > latest) return { caughtUp: true };
+
+  const windowEnd = from + BigInt(cfg.maxBlockRange) - 1n;
+  const to = windowEnd > latest ? latest : windowEnd;
+
+  if (merchants.length === 0) {
+    store.setCursor(cfg.chainId, source, to);
+    console.log(`[scan.native] blocks=${from}..${to} — no merchants onboarded yet`);
+    return { caughtUp: to >= latest };
+  }
+
+  const merchantSet = new Set(merchants.map((m) => m.toLowerCase()));
+  const rows: PaymentRow[] = [];
+
+  for (let bn = from; bn <= to; bn++) {
+    const block = await client.getBlock({ blockNumber: bn, includeTransactions: true });
+    for (const tx of block.transactions) {
+      if (typeof tx === 'string') continue;
+      if (!tx.to || tx.value === 0n) continue;
+      if (!merchantSet.has(tx.to.toLowerCase())) continue;
+
+      rows.push({
+        chainId: cfg.chainId,
+        token: NATIVE_TOKEN,
+        fromAddr: tx.from,
+        toAddr: tx.to,
+        amount: tx.value,
+        blockNumber: bn,
+        blockTimestamp: block.timestamp,
+        txHash: tx.hash,
+        logIndex: -1,
+        reference: extractReference(tx.input),
+      });
+    }
+  }
+
+  const inserted = store.insertPayments(rows);
+  store.setCursor(cfg.chainId, source, to);
+
+  if (inserted > 0) {
+    for (const r of rows) {
+      const refTag = r.reference ? ` ref=${r.reference.slice(0, 10)}…` : '';
+      console.log(
+        `[payment] token=native from=${r.fromAddr} amount=${fmtAmount(r.amount, 18)} block=${r.blockNumber} tx=${r.txHash}${refTag}`,
+      );
+    }
+  }
+  const range = to - from + 1n;
+  const suffix = inserted > 0 ? ` — ${inserted} payment(s)` : '';
+  console.log(`[scan.native] blocks=${from}..${to} (${range})${suffix}`);
   return { caughtUp: to >= latest };
 }
 
@@ -209,7 +281,10 @@ export async function run(client: PublicClient, store: Store, cfg: Config): Prom
       const merchants = store.distinctMerchants(cfg.chainId);
       for (const token of cfg.tokens) {
         if (stopped) break;
-        const { caughtUp } = await scanToken(client, store, cfg, token, latest, merchants);
+        const isNative = token.toLowerCase() === NATIVE_TOKEN.toLowerCase();
+        const { caughtUp } = isNative
+          ? await scanNative(client, store, cfg, latest, merchants)
+          : await scanToken(client, store, cfg, token, latest, merchants);
         if (!caughtUp) anyBehind = true;
       }
       if (!stopped) {
