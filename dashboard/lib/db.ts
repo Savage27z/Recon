@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
+import { TOKENS } from './chain';
 
 const CHAIN_ID = Number(process.env['RECON_CHAIN_ID'] ?? 133);
 const DB_PATH = resolve(
@@ -160,11 +161,19 @@ export interface MatchRow {
   ageLabel: string;
 }
 
-function fmt6(raw: bigint | string | number): string {
+function decimalsFor(token: string): number {
+  return TOKENS.find((t) => t.address.toLowerCase() === token.toLowerCase())?.decimals ?? 6;
+}
+
+function symbolFor(token: string): string {
+  return TOKENS.find((t) => t.address.toLowerCase() === token.toLowerCase())?.symbol ?? short(token);
+}
+
+function fmtAmount(raw: bigint | string | number, decimals: number): string {
   const b = typeof raw === 'bigint' ? raw : BigInt(String(raw));
-  const s = b.toString().padStart(7, '0');
-  const whole = s.slice(0, -6).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${whole}.${s.slice(-6)}`;
+  const s = b.toString().padStart(decimals + 1, '0');
+  const whole = s.slice(0, -decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${whole}.${s.slice(-decimals)}`;
 }
 
 function short(addr: string, front = 6, back = 4): string {
@@ -204,19 +213,28 @@ export function getStats(merchant: string): StatBlock {
       .get(CHAIN_ID, startOfDayMs, merchant) as { c: number }
   ).c;
 
-  const volumeRow = db()
+  // Grouped per-token: different tokens can have different decimals (HSK is
+  // 18dp vs the stablecoins' 6dp), so a single blended SUM would be
+  // meaningless — report each token's volume separately instead.
+  const volumeRows = db()
     .prepare(
-      `SELECT COALESCE(SUM(CAST(p.amount AS INTEGER)), 0) sum
+      `SELECT p.token token, COALESCE(SUM(CAST(p.amount AS INTEGER)), 0) sum
        FROM matches m
        JOIN invoices i ON i.chain_id = m.chain_id AND i.id = m.invoice_id
        JOIN payments p
          ON p.chain_id = m.chain_id
         AND p.tx_hash = m.tx_hash
         AND p.log_index = m.log_index
-       WHERE m.chain_id = ? AND m.created_at >= ? AND LOWER(i.merchant) = LOWER(?)`,
+       WHERE m.chain_id = ? AND m.created_at >= ? AND LOWER(i.merchant) = LOWER(?)
+       GROUP BY p.token`,
     )
-    .get(CHAIN_ID, startOfDayMs, merchant) as { sum: number | bigint };
-  const volumeToday6dp = fmt6(volumeRow.sum);
+    .all(CHAIN_ID, startOfDayMs, merchant) as Array<{ token: string; sum: number | bigint }>;
+  const volumeToday6dp =
+    volumeRows.length === 0
+      ? '0.000000'
+      : volumeRows
+          .map((r) => `${fmtAmount(r.sum, decimalsFor(r.token))} ${symbolFor(r.token)}`)
+          .join(' + ');
 
   const total = (
     db()
@@ -260,7 +278,7 @@ export function getQueue(merchant: string, limit = 25): QueueItem[] {
   const rows = db()
     .prepare(
       `SELECT m.invoice_id, m.confidence, m.evidence, m.created_at,
-              i.amount inv_amount,
+              i.amount inv_amount, i.token inv_token,
               p.amount pay_amount, p.from_addr, p.tx_hash, p.block_timestamp
        FROM matches m
        JOIN invoices i ON i.chain_id = m.chain_id AND i.id = m.invoice_id
@@ -282,11 +300,12 @@ export function getQueue(merchant: string, limit = 25): QueueItem[] {
     try {
       evidence = JSON.parse(String(r.evidence));
     } catch { /* noop */ }
+    const decimals = decimalsFor(String(r.inv_token));
     return {
       invoiceId: String(r.invoice_id),
       invoiceShort: invoiceShort(String(r.invoice_id)),
-      invoiceAmount6dp: fmt6(String(r.inv_amount)),
-      paymentAmount6dp: fmt6(String(r.pay_amount)),
+      invoiceAmount6dp: fmtAmount(String(r.inv_amount), decimals),
+      paymentAmount6dp: fmtAmount(String(r.pay_amount), decimals),
       wallet: short(String(r.from_addr)),
       txHash: String(r.tx_hash),
       ageLabel: ageLabel(Number(r.block_timestamp)),
@@ -299,7 +318,7 @@ export function getQueue(merchant: string, limit = 25): QueueItem[] {
 export function getFeed(merchant: string, limit = 20): FeedItem[] {
   const rows = db()
     .prepare(
-      `SELECT p.tx_hash, p.amount, p.from_addr, p.block_timestamp,
+      `SELECT p.tx_hash, p.amount, p.token, p.from_addr, p.block_timestamp,
               m.invoice_id, m.tier
        FROM payments p
        LEFT JOIN matches m
@@ -319,7 +338,7 @@ export function getFeed(merchant: string, limit = 20): FeedItem[] {
     const invLabel = r.invoice_id ? invoiceShort(String(r.invoice_id)) : 'unmatched';
     return {
       txHash: String(r.tx_hash),
-      amount6dp: fmt6(String(r.amount)),
+      amount6dp: fmtAmount(String(r.amount), decimalsFor(String(r.token))),
       invoice: invLabel,
       wallet: short(String(r.from_addr)),
       ageLabel: ageLabel(Number(r.block_timestamp)),
@@ -385,7 +404,7 @@ export function getInvoices(merchant: string, limit = 50): InvoiceRow[] {
   return rows.map((r) => ({
     id: String(r.id),
     idShort: invoiceShort(String(r.id)),
-    amount6dp: fmt6(String(r.amount)),
+    amount6dp: fmtAmount(String(r.amount), decimalsFor(String(r.token))),
     token: String(r.token),
     tokenShort: short(String(r.token)),
     dueDateLabel: new Date(Number(r.due_date) * 1000).toLocaleDateString(),
@@ -399,7 +418,7 @@ export function getRecentMatches(merchant: string, limit = 15): MatchRow[] {
   const rows = db()
     .prepare(
       `SELECT m.invoice_id, m.tier, m.created_at,
-              p.amount, p.from_addr, p.block_timestamp
+              p.amount, p.token, p.from_addr, p.block_timestamp
        FROM matches m
        JOIN invoices i ON i.chain_id = m.chain_id AND i.id = m.invoice_id
        JOIN payments p
@@ -417,7 +436,7 @@ export function getRecentMatches(merchant: string, limit = 15): MatchRow[] {
     return {
       invoiceId: String(r.invoice_id),
       invoiceShort: invoiceShort(String(r.invoice_id)),
-      amount6dp: fmt6(String(r.amount)),
+      amount6dp: fmtAmount(String(r.amount), decimalsFor(String(r.token))),
       wallet: short(String(r.from_addr)),
       tier,
       tierLabel: badge.label,
