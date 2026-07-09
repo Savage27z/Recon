@@ -55,7 +55,12 @@ export const InvoicesTable = forwardRef<InvoicesTableHandle>(function InvoicesTa
                   key={inv.id}
                   className="grid grid-cols-5 gap-2 text-[13.5px] py-[14px] px-1 border-b border-borderSoft items-center"
                 >
-                  <div className="font-bold">{inv.idShort}</div>
+                  <div>
+                    <div className="font-bold">{inv.idShort}</div>
+                    {inv.note ? (
+                      <div className="text-muted text-[11.5px] truncate max-w-[180px]">{inv.note}</div>
+                    ) : null}
+                  </div>
                   <div>{inv.amount6dp}</div>
                   <div className="font-mono text-muted text-[12.5px]">{inv.tokenShort}</div>
                   <div className="text-muted">{inv.dueDateLabel}</div>

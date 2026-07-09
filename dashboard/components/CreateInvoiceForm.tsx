@@ -31,13 +31,23 @@ function randomInvoiceId(): Hex {
 
 type Status = 'idle' | 'connecting' | 'awaiting-signature' | 'confirming' | 'done' | 'error';
 
+interface CreatedInvoice {
+  id: Hex;
+  txHash: Hex;
+  amount: string;
+  symbol: string;
+  merchant: string;
+  note: string;
+}
+
 export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
   const [amount, setAmount] = useState('');
   const [token, setToken] = useState<Address | ''>(TOKENS[0]?.address ?? '');
   const [dueDate, setDueDate] = useState('');
+  const [note, setNote] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ id: Hex; txHash: Hex } | null>(null);
+  const [result, setResult] = useState<CreatedInvoice | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -94,7 +104,8 @@ export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
       }
 
       const id = randomInvoiceId();
-      const decimals = TOKENS.find((t) => t.address.toLowerCase() === token.toLowerCase())?.decimals ?? 6;
+      const tokenMeta = TOKENS.find((t) => t.address.toLowerCase() === token.toLowerCase());
+      const decimals = tokenMeta?.decimals ?? 6;
       const amountBase = parseUnits(amount, decimals);
       const dueDateSec = BigInt(Math.floor(new Date(dueDate).getTime() / 1000));
 
@@ -113,10 +124,34 @@ export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
       setStatus('confirming');
       await waitForReceipt(provider, txHash);
 
-      setResult({ id, txHash });
+      const trimmedNote = note.trim();
+      if (trimmedNote) {
+        // Best-effort — the on-chain invoice already succeeded regardless of
+        // whether this off-chain note save works, so failures here don't
+        // roll back status or surface as a user-facing error.
+        try {
+          await fetch('/api/invoices/note', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoiceId: id, note: trimmedNote }),
+          });
+        } catch {
+          // ignore — see comment above
+        }
+      }
+
+      setResult({
+        id,
+        txHash,
+        amount,
+        symbol: tokenMeta?.symbol ?? 'tokens',
+        merchant: from,
+        note: trimmedNote,
+      });
       setStatus('done');
       setAmount('');
       setDueDate('');
+      setNote('');
       onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -170,6 +205,19 @@ export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
           />
         </div>
         <div className="sm:col-span-3">
+          <label className="text-[12.5px] font-bold text-muted mb-[6px] block">
+            What&apos;s this for? <span className="font-normal text-muted">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Invoice for design work, June retainer…"
+            maxLength={500}
+            className="w-full border border-border rounded-[10px] px-[14px] py-[10px] text-[13px]"
+          />
+        </div>
+        <div className="sm:col-span-3">
           <button
             type="submit"
             disabled={busy}
@@ -190,19 +238,87 @@ export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
           {error}
         </p>
       ) : null}
-      {result ? (
-        <p className="text-[13px] mt-4 text-muted">
-          Created —{' '}
-          <a
-            className="font-mono underline"
-            href={`${EXPLORER_URL}/tx/${result.txHash}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            view transaction
-          </a>
+      {result ? <InvoiceCreatedModal invoice={result} onClose={() => setResult(null)} /> : null}
+    </div>
+  );
+}
+
+function InvoiceCreatedModal({
+  invoice,
+  onClose,
+}: {
+  invoice: CreatedInvoice;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyAddress() {
+    try {
+      await navigator.clipboard.writeText(invoice.merchant);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard permission denied — user can still select/copy manually
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-card border border-border rounded-[18px] p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-[15px] font-extrabold text-greenText mb-1">
+          ✓ Invoice created
+        </div>
+        <p className="text-muted text-[13px] mb-4">
+          Recon's watcher will match this automatically once payment arrives.
         </p>
-      ) : null}
+
+        <div className="bg-cream border border-border rounded-[12px] p-4 mb-4">
+          <div className="text-[22px] font-extrabold font-mono">
+            {invoice.amount} {invoice.symbol}
+          </div>
+          {invoice.note ? (
+            <div className="text-[13px] text-muted mt-1">{invoice.note}</div>
+          ) : null}
+        </div>
+
+        <label className="text-[12.5px] font-bold text-muted mb-[6px] block">
+          Send payment to this address
+        </label>
+        <div className="flex items-center gap-2 mb-4">
+          <code className="flex-1 border border-border rounded-[10px] px-[14px] py-[10px] text-[13px] font-mono break-all">
+            {invoice.merchant}
+          </code>
+          <button
+            type="button"
+            onClick={copyAddress}
+            className="border border-border rounded-[10px] px-3 py-[10px] text-[13px] font-bold whitespace-nowrap"
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+
+        <a
+          className="block w-full text-center bg-orange text-white font-extrabold text-[14px] rounded-[10px] px-5 py-[12px] mb-3"
+          href={`${EXPLORER_URL}/tx/${invoice.txHash}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View transaction
+        </a>
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full text-center border border-border rounded-[10px] px-5 py-[12px] text-[14px] font-bold"
+        >
+          Close
+        </button>
+      </div>
     </div>
   );
 }

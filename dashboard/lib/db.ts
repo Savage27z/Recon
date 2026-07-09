@@ -46,6 +46,18 @@ function rwDb(): DatabaseSync {
       PRIMARY KEY (chain_id, merchant)
     );
   `);
+  // Freeform "what this invoice is for" text. The on-chain InvoiceRegistry
+  // has no memo field, so this lives only in the dashboard's own tables —
+  // it's merchant-facing context, not something the watcher/matcher reads.
+  cachedRw.exec(`
+    CREATE TABLE IF NOT EXISTS invoice_notes (
+      chain_id     INTEGER NOT NULL,
+      invoice_id   TEXT    NOT NULL,
+      note         TEXT    NOT NULL,
+      created_at   INTEGER NOT NULL,
+      PRIMARY KEY (chain_id, invoice_id)
+    );
+  `);
   return cachedRw;
 }
 
@@ -406,15 +418,17 @@ export interface InvoiceRow {
   status: string;
   createdTx: string;
   ageLabel: string;
+  note: string | null;
 }
 
 export function getInvoices(merchant: string, limit = 50): InvoiceRow[] {
   const rows = db()
     .prepare(
-      `SELECT id, amount, token, due_date, status, created_at_tx, seen_at
-       FROM invoices
-       WHERE chain_id = ? AND LOWER(merchant) = LOWER(?)
-       ORDER BY seen_at DESC
+      `SELECT i.id, i.amount, i.token, i.due_date, i.status, i.created_at_tx, i.seen_at, n.note
+       FROM invoices i
+       LEFT JOIN invoice_notes n ON n.chain_id = i.chain_id AND n.invoice_id = i.id
+       WHERE i.chain_id = ? AND LOWER(i.merchant) = LOWER(?)
+       ORDER BY i.seen_at DESC
        LIMIT ?`,
     )
     .all(CHAIN_ID, merchant, limit) as Array<Record<string, unknown>>;
@@ -428,7 +442,37 @@ export function getInvoices(merchant: string, limit = 50): InvoiceRow[] {
     status: String(r.status),
     createdTx: String(r.created_at_tx),
     ageLabel: ageLabel(Math.floor(Number(r.seen_at) / 1000)),
+    note: r.note == null ? null : String(r.note),
   }));
+}
+
+/**
+ * Attach a merchant-facing note to an invoice the caller actually owns.
+ * The on-chain registry has no memo field, so this is purely a dashboard
+ * convenience. Called right after the createInvoice tx confirms, which can
+ * race the watcher's own poll loop — the invoice row may not exist in this
+ * DB yet. invoiceId is a 256-bit client-generated random value, so an
+ * unrelated caller can't feasibly guess one in advance; the only real
+ * cross-tenant risk is overwriting a note on an invoice that already
+ * belongs to someone else, which this still rejects.
+ */
+export function setInvoiceNote(merchant: string, invoiceId: string, note: string): boolean {
+  const conn = rwDb();
+  const existing = conn
+    .prepare(`SELECT merchant FROM invoices WHERE chain_id = ? AND id = ?`)
+    .get(CHAIN_ID, invoiceId) as { merchant: string } | undefined;
+  if (existing && existing.merchant.toLowerCase() !== merchant.toLowerCase()) return false;
+
+  conn
+    .prepare(
+      `INSERT INTO invoice_notes (chain_id, invoice_id, note, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (chain_id, invoice_id) DO UPDATE SET
+         note = excluded.note,
+         created_at = excluded.created_at`,
+    )
+    .run(CHAIN_ID, invoiceId, note.slice(0, 500), Date.now());
+  return true;
 }
 
 export function getRecentMatches(merchant: string, limit = 15): MatchRow[] {
