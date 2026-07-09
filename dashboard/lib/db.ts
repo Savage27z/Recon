@@ -176,6 +176,18 @@ function fmtAmount(raw: bigint | string | number, decimals: number): string {
   return `${whole}.${s.slice(-decimals)}`;
 }
 
+// For the stat-card headline number only: full precision on an 18-decimal
+// token (HSK) is 18 fractional digits, which overflows a big-font card.
+// Cap the displayed fraction and drop trailing zeros — invoice/match tables
+// keep full fmtAmount precision since they have room and it's not misleading
+// there.
+function fmtCompact(raw: bigint | string | number, decimals: number, maxFractionDigits = 6): string {
+  const full = fmtAmount(raw, decimals);
+  const [whole, frac = ''] = full.split('.');
+  const capped = frac.slice(0, maxFractionDigits).replace(/0+$/, '');
+  return capped.length > 0 ? `${whole}.${capped}` : whole;
+}
+
 function short(addr: string, front = 6, back = 4): string {
   if (addr.length <= front + back + 3) return addr;
   return `${addr.slice(0, front)}…${addr.slice(-back)}`;
@@ -236,9 +248,9 @@ export function getStats(merchant: string): StatBlock {
     .all(CHAIN_ID, startOfDayMs, merchant) as Array<{ token: string; sum: string }>;
   const volumeToday6dp =
     volumeRows.length === 0
-      ? '0.000000'
+      ? '0'
       : volumeRows
-          .map((r) => `${fmtAmount(r.sum, decimalsFor(r.token))} ${symbolFor(r.token)}`)
+          .map((r) => `${fmtCompact(r.sum, decimalsFor(r.token))} ${symbolFor(r.token)}`)
           .join(' + ');
 
   const total = (
