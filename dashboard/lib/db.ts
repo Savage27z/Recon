@@ -49,8 +49,15 @@ function rwDb(): DatabaseSync {
 }
 
 // Ensure review_decisions exists before any read-only query references it —
-// db() can't CREATE TABLE since it's opened read-only.
-rwDb();
+// db() can't CREATE TABLE since it's opened read-only. Swallow failures here:
+// Next's build-time page-data collection imports this module before the
+// database file exists (e.g. in a fresh container build); tables still get
+// created lazily on the first real request via rwDb().
+try {
+  rwDb();
+} catch {
+  // no-op — see comment above
+}
 
 export type ReviewDecision = 'approved' | 'rejected';
 
